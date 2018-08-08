@@ -66,6 +66,7 @@ type t =
   ; waiting_for_available_job : t Fiber.Ivar.t Queue.t
   ; mutable status_line       : string
   ; mutable gen_status_line   : unit -> string option
+  ; proc_pool                 : Proc_pool.t
   }
 
 let log t = t.log
@@ -131,6 +132,7 @@ let rec go_rec t =
   if count = 0 then begin
     hide_status_line t.status_line;
     flush stderr;
+    Proc_pool.shutdown t.proc_pool;
     Fiber.return ()
   end else begin
     if t.display = Progress then begin
@@ -185,14 +187,16 @@ let go ?(log=Log.no_log) ?(config=Config.default)
              loop ".." (Filename.dirname s)
        else
          cwd);
+  let concurrency = match config.concurrency with Auto -> 1 | Fixed n -> n in
   let t =
     { log
     ; gen_status_line
     ; original_cwd = cwd
     ; display      = config.display
-    ; concurrency  = (match config.concurrency with Auto -> 1 | Fixed n -> n)
+    ; concurrency
     ; status_line  = ""
     ; waiting_for_available_job = Queue.create ()
+    ; proc_pool    = Proc_pool.spawn concurrency
     }
   in
   printer := print t;

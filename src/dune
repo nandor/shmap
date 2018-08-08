@@ -6,6 +6,7 @@
               xdg
               re
               opam_file_format
+              proc_pool
               usexp
               ocaml_config
               which_program)

@@ -1,6 +1,7 @@
 (** Scheduling *)
 
 open Stdune
+open Proc_pool
 
 (** [go ?log ?config ?gen_status_line fiber] runs the following fiber until it
     terminates. [gen_status_line] is used to print a status line when [config.display =

@@ -69,7 +69,14 @@ let proc_main chan_rd chan_wr =
       ()
     | Run { cmd; args; env; cwd } ->
       (* Run the request to completion, capturing outputs. *)
-      let status: Executor.result = Executor.execute cmd args env cwd in
+      let status: Executor.result =
+        try Executor.execute cmd args env cwd
+        with ex ->
+          { status = Unix.WEXITED(255)
+          ; stdout = ""
+          ; stderr = Printexc.to_string ex
+          }
+      in
 
       (* Write the repsonse back to the parent. *)
       Marshal.to_channel chan_wr status [];

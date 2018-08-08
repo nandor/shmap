@@ -7,7 +7,7 @@ type result =
   }
 
 
-let execute cmd args env cwd = match cmd with
+let execute prog args env cwd = match Filename.basename prog with
 | _ ->
   (* Create a temporary file, open it and then unlink it. *)
   let open_tmp suffix =
@@ -36,7 +36,7 @@ let execute cmd args env cwd = match cmd with
 
   (* Run the process and wait for it to finish. *)
   Sys.chdir cwd;
-  let pid = Unix.create_process_env cmd args env pipe_rd stdout stderr in
+  let pid = Unix.create_process_env prog args env pipe_rd stdout stderr in
   let _, status = Unix.waitpid [] pid in
 
   (* Return the status and the output. *)

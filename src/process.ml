@@ -215,7 +215,7 @@ let gen_id =
 
 let run_internal ?dir ?(stdout_to=Terminal) ?(stderr_to=Terminal) ~env ~purpose
       fail_mode prog args =
-  Scheduler.wait_for_available_job ()
+  Scheduler.get_scheduler ()
   >>= fun scheduler ->
   let display = Scheduler.display scheduler in
   let dir =
@@ -235,46 +235,30 @@ let run_internal ?dir ?(stdout_to=Terminal) ?(stderr_to=Terminal) ~env ~purpose
       (Colors.strip_colors_for_stderr command_line);
   let prog = Path.reach_for_running ?from:dir prog in
   let argv = Array.of_list (prog :: args) in
-  let output_filename, stdout_fd, stderr_fd, to_close =
-    match stdout_to, stderr_to with
-    | (Terminal, _ | _, Terminal) when !Clflags.capture_outputs ->
-      let fn = Temp.create "dune" ".output" in
-      let fd = Unix.openfile (Path.to_string fn) [O_WRONLY; O_SHARE_DELETE] 0 in
-      (Some fn, fd, fd, Some fd)
-    | _ ->
-      (None, Unix.stdout, Unix.stderr, None)
+  Scheduler.run scheduler prog argv (Env.to_unix env) dir
+  >>| fun (status, stdout, stderr) ->
+  let flush_out str = function
+    | Terminal ->  str
+    | File fn ->
+      Io.write_file fn str;
+      ""
+    | Opened_file { desc; tail; _ } ->
+      (match desc with
+      | Fd fd ->
+        ignore (Unix.write_substring fd str 0 (String.length str));
+        if tail then Unix.close fd;
+        ""
+      | Channel oc ->
+        flush oc;
+        output_string oc str;
+        if tail then close_out oc;
+        ""
+      )
   in
-  let stdout, close_stdout = get_std_output stdout_to ~default:stdout_fd in
-  let stderr, close_stderr = get_std_output stderr_to ~default:stderr_fd in
-  let run () =
-    Unix.create_process_env prog argv (Env.to_unix env)
-      Unix.stdin stdout stderr
-  in
-  let pid =
-    match dir with
-    | None -> run ()
-    | Some dir -> Scheduler.with_chdir scheduler ~dir ~f:run
-  in
-  Option.iter to_close ~f:Unix.close;
-  close_std_output close_stdout;
-  close_std_output close_stderr;
-  Scheduler.wait_for_process pid
-  >>| fun status ->
-  let output =
-    match output_filename with
-    | None -> ""
-    | Some fn ->
-      let s = Io.read_file fn in
-      Temp.destroy fn;
-      let len = String.length s in
-      if len > 0 && s.[len - 1] <> '\n' then
-        s ^ "\n"
-      else
-        s
-  in
+  let output = flush_out stdout stdout_to  ^ flush_out stderr stderr_to in
   Log.command (Scheduler.log scheduler)
     ~command_line:command_line
-    ~output:output
+    ~output
     ~exit_status:status;
   let _, progname, _ = Fancy.split_prog prog in
   let print fmt = Errors.kerrf ~f:(Scheduler.print scheduler) fmt in

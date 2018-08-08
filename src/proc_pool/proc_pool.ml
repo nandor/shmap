@@ -14,13 +14,15 @@ type job_queued =
   ; cmd: string
   ; args: string array
   ; env: string array
+  ; cwd: string
   }
 
 (* Finished job *)
 type job_result =
   { job_id: int
   ; status: Unix.process_status
-  ; output: string
+  ; stdout: string
+  ; stderr: string
   }
 
 
@@ -67,9 +69,9 @@ let proc_main pipe_rd pipe_wr =
     | Close ->
       (* Shutdown request, stop waiting for commands. *)
       ()
-    | Run { cmd; args; env } ->
+    | Run { cmd; args; env; cwd } ->
       (* Run the request to completion, capturing outputs. *)
-      let status = Executor.execute cmd args env in
+      let status: Executor.result = Executor.execute cmd args env cwd in
 
       (* Write the repsonse back to the parent. *)
       Marshal.to_channel chan_wr status [];
@@ -94,7 +96,8 @@ let dequeue_jobs t =
         let finished_job =
           { job_id = job
           ; status = result.status
-          ; output = result.output
+          ; stdout = result.stdout
+          ; stderr = result.stderr
           }
         in
         t.workers <- w :: t.workers;
@@ -122,11 +125,11 @@ let spawn njobs =
   in { workers; busy = []; pending = []; finished = []; next_id = 0 }
 
 (* Starts a job, delegating it to the process pool. *)
-let start t cmd args env =
+let start t cmd args env cwd =
   (* Place the job on the queue *)
   let queue_id = t.next_id in
   t.next_id <- queue_id + 1;
-  let job = { queue_id; cmd; args; env } in
+  let job = { queue_id; cmd; args; env; cwd } in
   t.pending <- List.append t.pending [job];
   (* Try to start it if there is a free process in the pool *)
   job_next t;

@@ -7,14 +7,21 @@ type job
 
 
 type job_result =
-  { job_id: int
+  { job_id: job
   ; status: Unix.process_status
-  ; output: string
+  ; stdout: string
+  ; stderr: string
   }
 
 val spawn : int -> t
 
-val start : t -> string -> string array -> string array -> job
+val start
+  :  t
+  -> string
+  -> string array
+  -> string array
+  -> string
+  -> job
 
 val wait : t -> job -> job_result
 

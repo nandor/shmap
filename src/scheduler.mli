@@ -13,9 +13,6 @@ val go
   -> 'a Fiber.t
   -> 'a
 
-(** Wait for the following process to terminate *)
-val wait_for_process : int -> Unix.process_status Fiber.t
-
 (** Set the status line generator for the current scheduler *)
 val set_status_line_generator : (unit -> string option) -> unit Fiber.t
 
@@ -26,13 +23,19 @@ type t
 
 (** Wait until less tham [!Clflags.concurrency] external processes are running and return
     the scheduler information. *)
-val wait_for_available_job : unit -> t Fiber.t
+val get_scheduler : unit -> t Fiber.t
 
 (** Logger *)
 val log : t -> Log.t
 
 (** Execute the given callback with current directory temporarily changed *)
-val with_chdir : t -> dir:Path.t -> f:(unit -> 'a) -> 'a
+val run
+  :  t
+  -> string
+  -> string array
+  -> string array
+  -> Path.t option
+  -> (Unix.process_status * string * string) Fiber.t
 
 (** Display mode for this scheduler *)
 val display : t -> Config.Display.t

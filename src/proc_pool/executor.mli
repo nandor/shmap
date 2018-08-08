@@ -2,7 +2,13 @@
 
 type result =
   { status: Unix.process_status
-  ; output: string
+  ; stdout: string
+  ; stderr: string
   }
 
-val execute : string -> string array -> string array -> result
+val execute
+  :  string
+  -> string array
+  -> string array
+  -> string
+  -> result

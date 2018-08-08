@@ -1,81 +1,41 @@
 open Import
 open Fiber.O
 
-type running_job =
-  { pid  : int
-  ; ivar : Unix.process_status Fiber.Ivar.t
-  }
-
-module Running_jobs : sig
-  val add : running_job -> unit
-  val wait : unit -> running_job * Unix.process_status
-  val count : unit -> int
-end = struct
-  let all = Hashtbl.create 128
-
-  let add job = Hashtbl.add all job.pid job
-
-  let count () = Hashtbl.length all
-
-  let resolve_and_remove_job pid =
-    let job =
-      match Hashtbl.find all pid with
-      | Some job -> job
-      | None -> assert false
-    in
-    Hashtbl.remove all pid;
-    job
-
-  exception Finished of running_job * Unix.process_status
-
-  let wait_nonblocking_win32 () =
-    match
-      Hashtbl.iter all ~f:(fun ~key:pid ~data:job ->
-        let pid, status = Unix.waitpid [WNOHANG] pid in
-        if pid <> 0 then
-          raise_notrace (Finished (job, status)))
-    with
-    | () -> None
-    | exception (Finished (job, status)) ->
-      Hashtbl.remove all job.pid;
-      Some (job, status)
-
-  let rec wait_win32 () =
-    match wait_nonblocking_win32 () with
-    | None ->
-      ignore (Unix.select [] [] [] 0.001);
-      wait_win32 ()
-    | Some x -> x
-
-  let wait_unix () =
-    let pid, status = Unix.wait () in
-    (resolve_and_remove_job pid, status)
-
-  let wait =
-    if Sys.win32 then
-      wait_win32
-    else
-      wait_unix
-end
 
 type t =
   { log                       : Log.t
   ; original_cwd              : string
   ; display                   : Config.Display.t
-  ; mutable concurrency       : int
-  ; waiting_for_available_job : t Fiber.Ivar.t Queue.t
   ; mutable status_line       : string
   ; mutable gen_status_line   : unit -> string option
   ; proc_pool                 : Proc_pool.t
   }
 
+type running_job =
+  { job  : Proc_pool.job
+  ; ivar : (Unix.process_status * string * string) Fiber.Ivar.t
+  }
+
+module Running_jobs : sig
+  val add : running_job -> unit
+  val wait : t -> running_job * Proc_pool.job_result
+  val count : unit -> int
+end = struct
+  let all = Hashtbl.create 128
+
+  let add job = Hashtbl.add all job.job job
+
+  let wait t =
+    let result = Proc_pool.wait_any t.proc_pool in
+    let job = Option.value_exn (Hashtbl.find all result.job_id) in
+    Hashtbl.remove all result.job_id;
+    (job, result)
+
+  let count () = Hashtbl.length all
+end
+
 let log t = t.log
 let display t = t.display
-
-let with_chdir t ~dir ~f =
-  Sys.chdir (Path.to_string dir);
-  protectx () ~finally:(fun () -> Sys.chdir t.original_cwd) ~f
-
 let hide_status_line s =
   let len = String.length s in
   if len > 0 then Printf.eprintf "\r%*s\r" len ""
@@ -97,33 +57,19 @@ let set_status_line_generator f =
   t.gen_status_line <- f
 
 let set_concurrency n =
-  Fiber.Var.get_exn t_var >>| fun t ->
-  t.concurrency <- n
+  Fiber.return ()
 
-let wait_for_available_job () =
-  Fiber.Var.get_exn t_var >>= fun t ->
-  if Running_jobs.count () < t.concurrency then
-    Fiber.return t
-  else begin
-    let ivar = Fiber.Ivar.create () in
-    Queue.push ivar t.waiting_for_available_job;
-    Fiber.Ivar.read ivar
-  end
+let get_scheduler () =
+  Fiber.Var.get_exn t_var
 
-let wait_for_process pid =
+let run t prog args env cwd =
+  let dir = Option.(
+    map cwd Path.to_absolute_filename |> value ~default:t.original_cwd
+  ) in
   let ivar = Fiber.Ivar.create () in
-  Running_jobs.add { pid; ivar };
+  let job = Proc_pool.start t.proc_pool prog args env dir in
+  Running_jobs.add { job; ivar };
   Fiber.Ivar.read ivar
-
-let rec restart_waiting_for_available_job t =
-  if Queue.is_empty t.waiting_for_available_job ||
-     Running_jobs.count () >= t.concurrency then
-    Fiber.return ()
-  else begin
-    Fiber.Ivar.fill (Queue.pop t.waiting_for_available_job) t
-    >>= fun () ->
-    restart_waiting_for_available_job t
-  end
 
 let rec go_rec t =
   Fiber.yield ()
@@ -149,10 +95,8 @@ let rec go_rec t =
         flush stderr;
         t.status_line <- status_line;
     end;
-    let job, status = Running_jobs.wait () in
-    Fiber.Ivar.fill job.ivar status
-    >>= fun () ->
-    restart_waiting_for_available_job t
+    let job, status = Running_jobs.wait t in
+    Fiber.Ivar.fill job.ivar (status.status, status.stdout, status.stderr)
     >>= fun () ->
     go_rec t
   end
@@ -193,9 +137,7 @@ let go ?(log=Log.no_log) ?(config=Config.default)
     ; gen_status_line
     ; original_cwd = cwd
     ; display      = config.display
-    ; concurrency
     ; status_line  = ""
-    ; waiting_for_available_job = Queue.create ()
     ; proc_pool    = Proc_pool.spawn concurrency
     }
   in

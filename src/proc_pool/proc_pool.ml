@@ -29,9 +29,8 @@ type job_result =
 (* Structure tracking a child process. *)
 type worker =
   { pid: int
-  ; pipe_rd: Unix.file_descr
   ; chan_rd: in_channel
-  ; pipe_wr: Unix.file_descr
+  ; chan_wr: out_channel
   }
 
 (* Job bool, tracking workers and queued jobs. *)
@@ -47,8 +46,9 @@ type t =
 type cmd = Run of job_queued | Close
 
 
-let job_send { pipe_wr } cmd =
+let job_send { chan_wr } cmd =
   let buffer = Bytes.unsafe_of_string (Marshal.to_string cmd []) in
+  let pipe_wr = Unix.descr_of_out_channel chan_wr in
   ignore (Unix.write pipe_wr buffer 0 (Bytes.length buffer))
 
 let job_next t =
@@ -61,9 +61,7 @@ let job_next t =
       t.pending <- ps;
       job_send w (Run p)
 
-let proc_main pipe_rd pipe_wr =
-  let chan_rd = Unix.in_channel_of_descr pipe_rd in
-  let chan_wr = Unix.out_channel_of_descr pipe_wr in
+let proc_main chan_rd chan_wr =
   let rec loop () =
     match Marshal.from_channel chan_rd with
     | Close ->
@@ -82,13 +80,16 @@ let proc_main pipe_rd pipe_wr =
   in loop ()
 
 let dequeue_jobs t =
-  let fds = List.map (fun ({ pipe_rd }, _) -> pipe_rd) t.busy in
+  let fds = List.map (fun ({ chan_rd }, _) ->
+    Unix.descr_of_in_channel chan_rd) t.busy
+  in
   match Unix.select fds [] [] (-1.) with
   | [], _, _ ->
     ()
   | fds, _, _ ->
     t.busy
-      |> List.filter (fun ({ pipe_rd }, _) -> List.mem pipe_rd fds)
+      |> List.filter (fun ({ chan_rd }, _) ->
+        List.mem (Unix.descr_of_in_channel chan_rd) fds)
       |> List.iter (fun (w, job) ->
         (* Read the response and finish the job. *)
         let { chan_rd } = w in
@@ -106,22 +107,21 @@ let dequeue_jobs t =
         (* After the worker is freed, start a job from the queue *)
         job_next t)
 
+let chan_pipe () =
+  let rd, wr = Unix.pipe () in
+  (Unix.in_channel_of_descr rd, Unix.out_channel_of_descr wr)
 
 (* Creates a new process pool with a given number of threads. *)
 let spawn njobs =
   let workers = List.init njobs (fun _ ->
-    let pipe_child_rd, pipe_wr = Unix.pipe () in
-    let pipe_rd, pipe_child_wr = Unix.pipe () in
+    let chan_child_rd, chan_wr = chan_pipe () in
+    let chan_rd, chan_child_wr = chan_pipe () in
     match Unix.fork () with
     | 0 ->
-      proc_main pipe_child_rd pipe_child_wr;
+      proc_main chan_child_rd chan_child_wr;
       exit 0
     | pid ->
-      { pid
-      ; pipe_rd
-      ; chan_rd = Unix.in_channel_of_descr pipe_rd
-      ; pipe_wr
-      })
+      { pid; chan_rd; chan_wr })
   in { workers; busy = []; pending = []; finished = []; next_id = 0 }
 
 (* Starts a job, delegating it to the process pool. *)

@@ -1,1 +1,1 @@
-let () = Main.main ()
+let () = Entry.main ()

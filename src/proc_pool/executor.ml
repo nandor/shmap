@@ -27,7 +27,12 @@ let execute prog args env cwd = match Filename.basename prog with
     let size = Unix.((fstat fd).st_size) in
     let buffer = Bytes.create size in
     ignore (Unix.lseek fd 0 Unix.SEEK_SET);
-    ignore (Unix.read fd buffer 0 size);
+    let rec loop off =
+      let read_bytes = Unix.read fd buffer off (size - off) in
+      let current = off + read_bytes in
+      if current != size then loop current
+    in
+    loop 0;
     Unix.close fd;
     Bytes.unsafe_to_string buffer
   in

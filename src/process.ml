@@ -238,7 +238,8 @@ let run_internal ?dir ?(stdout_to=Terminal) ?(stderr_to=Terminal) ~env ~purpose
   Scheduler.run scheduler prog argv (Env.to_unix env) dir
   >>| fun (status, stdout, stderr) ->
   let flush_out str = function
-    | Terminal ->  str
+    | Terminal ->
+      str
     | File fn ->
       Io.write_file fn str;
       ""
@@ -255,7 +256,7 @@ let run_internal ?dir ?(stdout_to=Terminal) ?(stderr_to=Terminal) ~env ~purpose
         ""
       )
   in
-  let output = flush_out stdout stdout_to  ^ flush_out stderr stderr_to in
+  let output = flush_out stdout stdout_to ^ flush_out stderr stderr_to in
   Log.command (Scheduler.log scheduler)
     ~command_line:command_line
     ~output

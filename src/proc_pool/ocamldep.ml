@@ -18,41 +18,15 @@ open Parsetree
 module String = Misc.Stdlib.String
 
 let ppf = Format.err_formatter
-(* Print the dependencies *)
 
-type file_kind = ML | MLI;;
-
-let load_path = ref ([] : (string * string array) list)
-let files = ref ([] : (string * file_kind * String.Set.t * string list) list)
-
-(* Fix path to use '/' as directory separator instead of '\'.
-   Only under Windows. *)
-
+(* Fix path to use '/' as directory separator instead of '\'. Under Windows. *)
 let fix_slash s =
   if Sys.os_type = "Unix" then s else begin
     String.map (function '\\' -> '/' | c -> c) s
   end
 
-(* Since we reinitialize load_path after reading OCAMLCOMP,
-  we must use a cache instead of calling Sys.readdir too often. *)
-let dirs = ref String.Map.empty
-let readdir dir =
-  try
-    String.Map.find dir !dirs
-  with Not_found ->
-    let contents = Sys.readdir dir in
-    dirs := String.Map.add dir contents !dirs;
-    contents
-
 let add_to_list li s =
   li := s :: !li
-
-let add_to_load_path dir =
-  let dir = Misc.expand_directory Config.standard_library dir in
-  let contents = readdir dir in
-  add_to_list load_path (dir, contents)
-
-let (depends_on, escaped_eol) = (":", " \\\n    ")
 
 let filename_to_string s =
   let s = if !Clflags.force_slash then fix_slash s else s in
@@ -82,16 +56,14 @@ let filename_to_string s =
   end
 ;;
 
-let raw_deps_to_string source_file deps =
+let file_deps_to_string (source_file, extracted_deps, _) =
   let is_predef dep = (String.length dep > 0) && (match dep.[0] with
     | 'A'..'Z' | '\128'..'\255' -> true
     | _ -> false)
   in
-  let defs = String.Set.elements deps |> List.filter is_predef in
-  (filename_to_string source_file) ^ depends_on ^ " " ^ String.concat " " defs
+  let defs = String.Set.elements extracted_deps |> List.filter is_predef in
+  (filename_to_string source_file) ^ ": " ^ String.concat " " defs
 
-
-(* Process one file *)
 let tool_name = "ocamldep"
 
 let read_parse_and_extract parse_function extract_function def ast_kind
@@ -115,9 +87,6 @@ let read_parse_and_extract parse_function extract_function def ast_kind
     raise x
   end
 
-let file_deps_to_string (source_file, kind, extracted_deps, pp_deps) =
-  raw_deps_to_string source_file extracted_deps
-
 let ml_file_dependencies source_file =
   let parse_use_file_as_impl lexbuf =
     let f x =
@@ -131,43 +100,19 @@ let ml_file_dependencies source_file =
     read_parse_and_extract parse_use_file_as_impl Depend.add_implementation ()
                            Pparse.Structure source_file
   in
-  files := (source_file, ML, extracted_deps, !Depend.pp_deps) :: !files
+  [(source_file, extracted_deps, !Depend.pp_deps)]
 
 let mli_file_dependencies source_file =
   let (extracted_deps, ()) =
     read_parse_and_extract Parse.interface Depend.add_signature ()
                            Pparse.Signature source_file
   in
-  files := (source_file, MLI, extracted_deps, !Depend.pp_deps) :: !files
+  [(source_file, extracted_deps, !Depend.pp_deps)]
 
-let process_file_as process_fun def source_file =
+let process_file_as process_fun source_file =
   Compenv.readenv ppf (Before_compile source_file);
-  load_path := [];
-  List.iter add_to_load_path (
-      (!Compenv.last_include_dirs @
-       !Clflags.include_dirs @
-       !Compenv.first_include_dirs
-      ));
   Location.input_name := source_file;
-  if Sys.file_exists source_file then process_fun source_file else def
-
-let process_file source_file ~ml_file ~mli_file ~def =
-  if Filename.check_suffix source_file ".ml" then
-    process_file_as ml_file def source_file
-  else if Filename.check_suffix source_file ".mli" then
-    process_file_as mli_file def source_file
-  else
-    def
-
-let file_dependencies source_file =
-  process_file source_file ~def:()
-    ~ml_file:ml_file_dependencies
-    ~mli_file:mli_file_dependencies
-
-let file_dependencies_as kind =
-  match kind with
-  | ML -> process_file_as ml_file_dependencies ()
-  | MLI -> process_file_as mli_file_dependencies ()
+  if Sys.file_exists source_file then process_fun source_file else []
 
 let run argv env cwd =
   try
@@ -180,30 +125,27 @@ let run argv env cwd =
     Clflags.open_modules := [];
     Clflags.force_slash := false;
     Clflags.preprocessor := None;
-    load_path := [];
-    files := [];
 
     add_to_list first_include_dirs Filename.current_dir_name;
 
     Compenv.readenv ppf Before_args;
 
-    Clflags.reset_arguments (); (* reset arguments from ocamlc/ocamlopt *)
-
-    Clflags.add_arguments __LOC__ [
-       "-modules", Arg.Unit (fun () -> ()),
-        " Print module dependencies in raw form (not suitable for make)";
-       "-impl", Arg.String (file_dependencies_as ML),
-          "<f>  Process <f> as a .ml file";
-       "-intf", Arg.String (file_dependencies_as MLI),
-          "<f>  Process <f> as a .mli file";
-     ];
-
-    Clflags.parse_arguments argv file_dependencies "";
+    let files = match Array.to_list argv with
+      | _ :: "-modules" :: "-impl" :: file :: [] ->
+        process_file_as ml_file_dependencies file
+      | _ :: "-modules" :: "-intf" :: file :: [] ->
+        process_file_as mli_file_dependencies file
+      | _ ->
+        []
+    in
 
     Compenv.readenv ppf Before_link;
 
-    let sorted_files = List.sort compare !files in
-    let deps = String.concat "\n" (List.map file_deps_to_string sorted_files) in
+    let deps = files
+      |> List.sort compare
+      |> List.map file_deps_to_string
+      |> String.concat "\n"
+    in
     (Unix.WEXITED(0), deps, "")
   with exc ->
     (* TODO: print exceptions *)

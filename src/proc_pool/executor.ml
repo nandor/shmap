@@ -6,11 +6,9 @@ type result =
 
 
 let execute prog args env cwd = match Filename.basename prog with
-(*
 | "ocamlc.opt" ->
   let status, stdout, stderr = Ocamlc.run args env cwd in
   { status; stdout; stderr }
-*)
 | "ocamldep.opt" ->
   let status, stdout, stderr = Ocamldep.run args env cwd in
   { status; stdout; stderr }

@@ -191,6 +191,9 @@ let run argv env cwd =
     Sys.chdir cwd;
     reset_config ();
     Clflags.reset_flags ();
+    Compenv.clear_deferred_actions ();
+    Config.interface_suffix := ".mli";
+    Bytelink.reset ();
 
     readenv ppf Before_args;
 

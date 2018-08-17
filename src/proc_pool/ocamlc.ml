@@ -1,6 +1,6 @@
-
 open Clflags
 open Compenv
+
 let usage = "Usage: ocamlc <options> <files>\nOptions are:"
 
 let ppf = Format.err_formatter
@@ -114,13 +114,8 @@ module Options = Main_args.Make_bytecomp_options (struct
   let anonymous = anonymous
 end)
 
-let reset_config () =
-  show_config := false;
-  show_config_var := None
-
 
 let main () =
-  Compmisc.read_color_env ();
   begin try
     Compenv.process_deferred_actions
       (ppf,
@@ -189,33 +184,38 @@ let main () =
 let run argv env cwd =
   try
     Sys.chdir cwd;
-    reset_config ();
+
+    show_config := false;
+    show_config_var := None;
     Clflags.reset_flags ();
     Compenv.clear_deferred_actions ();
     Config.interface_suffix := ".mli";
+    Asmlink.reset ();
     Bytelink.reset ();
+    native_code := false;
 
     readenv ppf Before_args;
 
     Clflags.reset_arguments ();
     Clflags.add_arguments __LOC__ Options.list;
     Clflags.parse_arguments argv anonymous usage;
+    Compmisc.read_color_env ();
 
-    if !show_config then
+    (match !show_config, !show_config_var with
+    | true, _ ->
       (Unix.WEXITED(0), Config.config_string ^ "\n", "")
-    else
-      (match !show_config_var with
-      | Some name ->
-        (match Config.config_var name with
-        | Some var -> (Unix.WEXITED(0), var, "")
-        | None -> (Unix.WEXITED(2), "", "")
-        )
-      | None ->
-        main ();
-        (Unix.WEXITED(0), "", "")
+    | _, Some name ->
+      (match Config.config_var name with
+      | Some var -> (Unix.WEXITED(0), var, "")
+      | None -> (Unix.WEXITED(2), "", "")
       )
+    | _, None ->
+      main ();
+      (Unix.WEXITED(0), "", "")
+    )
   with exc ->
     (* TODO: print exceptions *)
-    Printexc.print_backtrace stdout;
-    print_endline (Printexc.to_string exc);
+    Array.iter (Printf.eprintf "%s\n") argv;
+    Printexc.print_backtrace stderr;
+    Location.report_exception ppf exc;
     (Unix.WEXITED(2), "", "Compiler error")

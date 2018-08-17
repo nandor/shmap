@@ -1,3 +1,6 @@
 (library
   (name proc_pool)
-  (libraries unix ocaml-compiler-libs.common ocaml-compiler-libs.bytecomp))
+  (libraries unix
+    ocaml-compiler-libs.common
+    ocaml-compiler-libs.bytecomp
+    ocaml-compiler-libs.optcomp))

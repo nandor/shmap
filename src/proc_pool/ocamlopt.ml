@@ -314,6 +314,7 @@ let run argv env cwd =
     Config.interface_suffix := ".mli";
     Asmlink.reset ();
     Bytelink.reset ();
+    Profile.reset ();
     native_code := true;
 
     readenv ppf Before_args;
@@ -333,7 +334,6 @@ let run argv env cwd =
       )
     | _, None ->
       main ();
-      Profile.print Format.std_formatter [ `Time ];
       (Unix.WEXITED(0), "", "")
     )
   with exc ->

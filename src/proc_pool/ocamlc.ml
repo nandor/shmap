@@ -192,6 +192,7 @@ let run argv env cwd =
     Config.interface_suffix := ".mli";
     Asmlink.reset ();
     Bytelink.reset ();
+    Profile.reset ();
     native_code := false;
 
     readenv ppf Before_args;

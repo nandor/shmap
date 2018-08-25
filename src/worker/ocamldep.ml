@@ -20,6 +20,8 @@ module String = Misc.Stdlib.String
 
 let ppf = Format.err_formatter
 
+let tool_name = "ocamldep"
+
 (* Fix path to use '/' as directory separator instead of '\'. Under Windows. *)
 let fix_slash s =
   if Sys.os_type = "Unix" then s else begin
@@ -65,48 +67,43 @@ let file_deps_to_string (source_file, extracted_deps, _) =
   let defs = String.Set.elements extracted_deps |> List.filter is_predef in
   (filename_to_string source_file) ^ ": " ^ String.concat " " defs
 
-let tool_name = "ocamldep"
+let read_parse_and_extract (type a)
+  (extract_function: Depend.bound_map -> a -> unit)
+  (ast_kind: a Pparse.ast_kind)
+  source_file =
 
-let read_parse_and_extract parse_function extract_function def ast_kind
-    source_file =
   Depend.pp_deps := [];
   Depend.free_structure_names := String.Set.empty;
-  let input_file = Pparse.preprocess source_file in
-  begin try
-    let ast = Pparse.file ~tool_name input_file parse_function ast_kind in
-    let bound_vars =
-      List.fold_left
-        (fun bv modname ->
-          Depend.open_module bv (Longident.parse modname))
-       String.Map.empty ((* PR#7248 *) List.rev !Clflags.open_modules)
-    in
-    let r = extract_function bound_vars ast in
-    Pparse.remove_preprocessed input_file;
-    (!Depend.free_structure_names, r)
-  with x ->
-    Pparse.remove_preprocessed input_file;
-    raise x
-  end
+  let bound_vars =
+    List.fold_left
+      (fun bv modname ->
+        Depend.open_module bv (Longident.parse modname))
+     String.Map.empty ((* PR#7248 *) List.rev !Clflags.open_modules)
+  in
+  let preprocessor = !Clflags.preprocessor in
+  let all_ppx = !Clflags.all_ppx in
+  let ast: a = match ast_kind with
+  | Pparse.Structure ->
+    Cached_parser.parse_impl ~tool_name ~preprocessor ~all_ppx source_file
+  | Pparse.Signature ->
+    Cached_parser.parse_intf ~tool_name ~preprocessor ~all_ppx source_file
+  in
+  extract_function bound_vars ast;
+  !Depend.free_structure_names
 
 let ml_file_dependencies source_file =
-  let parse_use_file_as_impl lexbuf =
-    let f x =
-      match x with
-      | Ptop_def s -> s
-      | Ptop_dir _ -> []
-    in
-    List.flatten (List.map f (Parse.use_file lexbuf))
-  in
-  let (extracted_deps, ()) =
-    read_parse_and_extract parse_use_file_as_impl Depend.add_implementation ()
-                           Pparse.Structure source_file
+  let extracted_deps = read_parse_and_extract
+    Depend.add_implementation
+    Pparse.Structure
+    source_file
   in
   [(source_file, extracted_deps, !Depend.pp_deps)]
 
 let mli_file_dependencies source_file =
-  let (extracted_deps, ()) =
-    read_parse_and_extract Parse.interface Depend.add_signature ()
-                           Pparse.Signature source_file
+  let extracted_deps = read_parse_and_extract
+    Depend.add_signature
+    Pparse.Signature
+    source_file
   in
   [(source_file, extracted_deps, !Depend.pp_deps)]
 
@@ -125,7 +122,7 @@ let run argv env cwd =
     Clflags.include_dirs := [];
     Clflags.open_modules := [];
     Clflags.force_slash := false;
-    Clflags.preprocessor := None;
+    Profile.reset ();
 
     add_to_list first_include_dirs Filename.current_dir_name;
 

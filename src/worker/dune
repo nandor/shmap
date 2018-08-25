@@ -1,5 +1,5 @@
 (library
-  (name proc_pool)
+  (name worker)
   (libraries unix
     ocaml-compiler-libs.common
     ocaml-compiler-libs.bytecomp

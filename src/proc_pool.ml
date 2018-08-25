@@ -7,12 +7,11 @@ exception Job_finished
 (* External ID tracking a job *)
 type job = int
 
-
 (* Job submitted to a worker. *)
 type job_queued =
   { queue_id: int
   ; cmd: string
-  ; args: string array
+  ; argv: string array
   ; env: string array
   ; cwd: string
   }
@@ -42,9 +41,13 @@ type t =
   ; mutable next_id : int
   }
 
+type cmd
+  = Run of string * string array * string array * string
+  | Close
 
-type cmd = Run of job_queued | Close
 
+let worker_name = "main_worker.exe"
+let worker_path = Filename.(concat (dirname Sys.executable_name) worker_name)
 
 let job_send { chan_wr } cmd =
   let buffer = Bytes.unsafe_of_string (Marshal.to_string cmd []) in
@@ -59,32 +62,7 @@ let job_next t =
       t.workers <- ws;
       t.busy <- (w, p.queue_id) :: t.busy;
       t.pending <- ps;
-      job_send w (Run p)
-
-let proc_main chan_rd chan_wr =
-  let rec loop () =
-    match Marshal.from_channel chan_rd with
-    | Close ->
-      (* Shutdown request, stop waiting for commands. *)
-      ()
-    | Run { cmd; args; env; cwd } ->
-      (* Run the request to completion, capturing outputs. *)
-      let status: Executor.result =
-        try Executor.execute cmd args env cwd
-        with ex ->
-          { status = Unix.WEXITED(255)
-          ; stdout = ""
-          ; stderr = Printexc.to_string ex
-          }
-      in
-
-      (* Write the repsonse back to the parent. *)
-      Marshal.to_channel chan_wr status [];
-      flush chan_wr;
-
-      (* Keep on waiting for jobs. *)
-      loop ()
-  in loop ()
+      job_send w (Run(p.cmd, p.argv, p.env, p.cwd))
 
 let dequeue_jobs t =
   let fds = List.map (fun ({ chan_rd }, _) ->
@@ -100,43 +78,48 @@ let dequeue_jobs t =
       |> List.iter (fun (w, job) ->
         (* Read the response and finish the job. *)
         let { chan_rd } = w in
-        let result: Executor.result = Marshal.from_channel chan_rd in
-        let finished_job =
-          { job_id = job
-          ; status = result.status
-          ; stdout = result.stdout
-          ; stderr = result.stderr
-          }
-        in
+        let status, stdout, stderr = Marshal.from_channel chan_rd in
+        let finished_job = { job_id = job; status; stdout; stderr } in
+
         t.workers <- w :: t.workers;
         t.busy <- List.filter (fun (w', _) -> w != w') t.busy;
         t.finished <- finished_job :: t.finished;
         (* After the worker is freed, start a job from the queue *)
         job_next t)
 
-let chan_pipe () =
-  let rd, wr = Unix.pipe () in
-  (Unix.in_channel_of_descr rd, Unix.out_channel_of_descr wr)
-
 (* Creates a new process pool with a given number of threads. *)
 let spawn njobs =
-  let workers = List.init njobs (fun _ ->
-    let chan_child_rd, chan_wr = chan_pipe () in
-    let chan_rd, chan_child_wr = chan_pipe () in
-    match Unix.fork () with
+  let workers = List.init njobs Unix.(fun _ ->
+    let chan_child_rd, chan_wr = pipe ~cloexec:false () in
+    let chan_rd, chan_child_wr = pipe ~cloexec:false () in
+    match fork () with
     | 0 ->
-      proc_main chan_child_rd chan_child_wr;
-      exit 0
+      (* Child process *)
+      close chan_rd;
+      close chan_wr;
+
+      dup2 chan_child_rd (Obj.magic 100);
+      close chan_child_rd;
+      dup2 chan_child_wr (Obj.magic 101);
+      close chan_child_wr;
+
+      execv worker_path [|worker_name|]
     | pid ->
-      { pid; chan_rd; chan_wr })
+      (* Parent process *)
+      close chan_child_wr;
+      close chan_child_rd;
+      { pid
+      ; chan_rd = in_channel_of_descr chan_rd
+      ; chan_wr = out_channel_of_descr chan_wr
+      })
   in { workers; busy = []; pending = []; finished = []; next_id = 0 }
 
 (* Starts a job, delegating it to the process pool. *)
-let start t cmd args env cwd =
+let start t cmd argv env cwd =
   (* Place the job on the queue *)
   let queue_id = t.next_id in
   t.next_id <- queue_id + 1;
-  let job = { queue_id; cmd; args; env; cwd } in
+  let job = { queue_id; cmd; argv; env; cwd } in
   t.pending <- List.append t.pending [job];
   (* Try to start it if there is a free process in the pool *)
   job_next t;

@@ -238,11 +238,13 @@ let main () =
     fatal "Profiling with \"gprof\" is not supported on this platform.";
   begin try
     Compenv.process_deferred_actions
-      (ppf,
-       Optcompile.implementation ~backend,
-       Optcompile.interface,
-       ".cmx",
-       ".cmxa");
+      Cached_parser.
+      ( ppf
+      , Optcompile.implementation ~frontend:(Some parse_impl) ~backend
+      , Optcompile.interface ~frontend:(Some parse_intf)
+      , ".cmx"
+      , ".cmxa"
+      );
   with Arg.Bad msg ->
     begin
       prerr_endline msg;
@@ -303,19 +305,24 @@ let main () =
     Warnings.check_fatal ();
   end
 
+let reset () =
+  show_config := false;
+  show_config_var := None;
+  Clflags.reset_flags ();
+  Compenv.reset ();
+  Config.load_path := [];
+  Config.interface_suffix := ".mli";
+  Compilenv.reset "";
+  Asmlink.reset ();
+  Bytelink.reset ();
+  Profile.reset ();
+  native_code := true
+
 let run argv env cwd =
   try
     Sys.chdir cwd;
 
-    show_config := false;
-    show_config_var := None;
-    Clflags.reset_flags ();
-    Compenv.clear_deferred_actions ();
-    Config.interface_suffix := ".mli";
-    Asmlink.reset ();
-    Bytelink.reset ();
-    Profile.reset ();
-    native_code := true;
+    reset ();
 
     readenv ppf Before_args;
 
@@ -334,6 +341,7 @@ let run argv env cwd =
       )
     | _, None ->
       main ();
+      reset ();
       (Unix.WEXITED(0), "", "")
     )
   with exc ->

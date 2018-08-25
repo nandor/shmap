@@ -19,3 +19,10 @@
  (modules     main_jbuilder)
  (libraries   which_program_jbuilder entry)
  (preprocess  no_preprocessing))
+
+(executable
+ (name        main_worker)
+ (public_name dune_worker)
+ (modules     main_worker)
+ (libraries   worker)
+ (preprocess  no_preprocessing))

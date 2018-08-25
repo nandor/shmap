@@ -118,18 +118,22 @@ end)
 let main () =
   begin try
     Compenv.process_deferred_actions
-      (ppf,
-       Compile.implementation,
-       Compile.interface,
-       ".cmo",
-       ".cma");
+      Cached_parser.
+      ( ppf
+      , Compile.implementation ~frontend:(Some parse_impl)
+      , Compile.interface ~frontend:(Some parse_intf)
+      , ".cmo"
+      , ".cma"
+      );
   with Arg.Bad msg ->
+    (* TODO: do not exit *)
     begin
       prerr_endline msg;
       Clflags.print_arguments usage;
       exit 2
     end
   end;
+
   readenv ppf Before_link;
   if
     List.length
@@ -141,6 +145,7 @@ let main () =
       fatal "Option -i is incompatible with -pack, -a, -output-obj"
     else
       fatal "Please specify at most one of -pack, -a, -c, -output-obj";
+
   if !make_archive then begin
     Compmisc.init_path false;
 
@@ -180,20 +185,23 @@ let main () =
     Warnings.check_fatal ();
   end
 
+let reset () =
+  show_config := false;
+  show_config_var := None;
+  Clflags.reset_flags ();
+  Compenv.reset ();
+  Config.load_path := [];
+  Config.interface_suffix := ".mli";
+  Asmlink.reset ();
+  Bytelink.reset ();
+  Profile.reset ();
+  native_code := false
 
 let run argv env cwd =
   try
     Sys.chdir cwd;
 
-    show_config := false;
-    show_config_var := None;
-    Clflags.reset_flags ();
-    Compenv.clear_deferred_actions ();
-    Config.interface_suffix := ".mli";
-    Asmlink.reset ();
-    Bytelink.reset ();
-    Profile.reset ();
-    native_code := false;
+    reset ();
 
     readenv ppf Before_args;
 
@@ -212,6 +220,7 @@ let run argv env cwd =
       )
     | _, None ->
       main ();
+      reset ();
       (Unix.WEXITED(0), "", "")
     )
   with exc ->

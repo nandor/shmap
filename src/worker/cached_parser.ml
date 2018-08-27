@@ -22,4 +22,3 @@ let parse_intf ~tool_name ~preprocessor ~all_ppx sourcefile =
     in
     Hashtbl.add intf_cache sourcefile ast;
     ast
-

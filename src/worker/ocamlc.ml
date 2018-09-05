@@ -115,13 +115,16 @@ module Options = Main_args.Make_bytecomp_options (struct
 end)
 
 
-let main () =
+let compile () =
   begin try
     Compenv.process_deferred_actions
-      Cached_parser.
       ( ppf
-      , Compile.implementation ~frontend:(Some parse_impl)
-      , Compile.interface ~frontend:(Some parse_intf)
+      , Compile.implementation
+          ~frontend:(Some Cache.parse_impl)
+          ~typing:(Some Cache.typecheck_impl)
+      , Compile.interface
+          ~frontend:(Some Cache.parse_intf)
+          ~typing:(Some Cache.typecheck_intf)
       , ".cmo"
       , ".cma"
       );
@@ -198,9 +201,8 @@ let reset () =
   native_code := false
 
 let run argv env cwd =
-  try
+  try Warnings.context @@ fun () ->
     Sys.chdir cwd;
-
     reset ();
 
     readenv ppf Before_args;
@@ -219,11 +221,12 @@ let run argv env cwd =
       | None -> (Unix.WEXITED(2), "", "")
       )
     | _, None ->
-      main ();
+      compile ();
       reset ();
       (Unix.WEXITED(0), "", "")
     )
   with exc ->
+    flush_all ();
     (* TODO: print exceptions *)
     Array.iter (Printf.eprintf "%s\n") argv;
     Printexc.print_backtrace stderr;

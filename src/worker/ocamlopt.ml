@@ -238,10 +238,14 @@ let main () =
     fatal "Profiling with \"gprof\" is not supported on this platform.";
   begin try
     Compenv.process_deferred_actions
-      Cached_parser.
       ( ppf
-      , Optcompile.implementation ~frontend:(Some parse_impl) ~backend
-      , Optcompile.interface ~frontend:(Some parse_intf)
+      , Optcompile.implementation
+          ~frontend:(Some Cache.parse_impl)
+          ~typing:(Some Cache.typecheck_impl)
+          ~backend
+      , Optcompile.interface
+          ~frontend:(Some Cache.parse_intf)
+          ~typing:(Some Cache.typecheck_intf)
       , ".cmx"
       , ".cmxa"
       );
@@ -319,7 +323,7 @@ let reset () =
   native_code := true
 
 let run argv env cwd =
-  try
+  try Warnings.context @@ fun () ->
     Sys.chdir cwd;
 
     reset ();
@@ -345,6 +349,7 @@ let run argv env cwd =
       (Unix.WEXITED(0), "", "")
     )
   with exc ->
+    flush_all ();
     (* TODO: print exceptions *)
     Array.iter (Printf.eprintf "%s\n") argv;
     Printexc.print_backtrace stderr;

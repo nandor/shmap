@@ -84,9 +84,9 @@ let read_parse_and_extract (type a)
   let all_ppx = !Clflags.all_ppx in
   let ast: a = match ast_kind with
   | Pparse.Structure ->
-    Cached_parser.parse_impl ~tool_name ~preprocessor ~all_ppx source_file
+    Cache.parse_impl ~tool_name ~preprocessor ~all_ppx source_file
   | Pparse.Signature ->
-    Cached_parser.parse_intf ~tool_name ~preprocessor ~all_ppx source_file
+    Cache.parse_intf ~tool_name ~preprocessor ~all_ppx source_file
   in
   extract_function bound_vars ast;
   !Depend.free_structure_names

@@ -233,7 +233,7 @@ module Backend = struct
 end
 let backend = (module Backend : Backend_intf.S)
 
-let main () =
+let compile ppf =
   if !gprofile && not Config.profiling then
     fatal "Profiling with \"gprof\" is not supported on this platform.";
   begin try
@@ -323,6 +323,8 @@ let reset () =
   native_code := true
 
 let run argv env cwd =
+  let ppf = Format.str_formatter in
+  Location.formatter_for_warnings := ppf;
   try Warnings.context @@ fun () ->
     Sys.chdir cwd;
 
@@ -344,14 +346,10 @@ let run argv env cwd =
       | None -> (Unix.WEXITED(2), "", "")
       )
     | _, None ->
-      main ();
+      compile ppf;
       reset ();
-      (Unix.WEXITED(0), "", "")
+      (Unix.WEXITED(0), "", Format.flush_str_formatter ())
     )
   with exc ->
-    flush_all ();
-    (* TODO: print exceptions *)
-    Array.iter (Printf.eprintf "%s\n") argv;
-    Printexc.print_backtrace stderr;
     Location.report_exception ppf exc;
-    (Unix.WEXITED(2), "", "ocamlopt error")
+    (Unix.WEXITED(2), "", Format.flush_str_formatter ())

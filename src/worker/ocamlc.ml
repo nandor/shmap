@@ -3,8 +3,6 @@ open Compenv
 
 let usage = "Usage: ocamlc <options> <files>\nOptions are:"
 
-let ppf = Format.err_formatter
-
 let show_config = ref false
 let show_config_var = ref None
 
@@ -115,7 +113,7 @@ module Options = Main_args.Make_bytecomp_options (struct
 end)
 
 
-let compile () =
+let compile ppf =
   begin try
     Compenv.process_deferred_actions
       ( ppf
@@ -201,6 +199,8 @@ let reset () =
   native_code := false
 
 let run argv env cwd =
+  let ppf = Format.str_formatter in
+  Location.formatter_for_warnings := ppf;
   try Warnings.context @@ fun () ->
     Sys.chdir cwd;
     reset ();
@@ -221,14 +221,10 @@ let run argv env cwd =
       | None -> (Unix.WEXITED(2), "", "")
       )
     | _, None ->
-      compile ();
+      compile ppf;
       reset ();
-      (Unix.WEXITED(0), "", "")
+      (Unix.WEXITED(0), "", Format.flush_str_formatter ())
     )
   with exc ->
-    flush_all ();
-    (* TODO: print exceptions *)
-    Array.iter (Printf.eprintf "%s\n") argv;
-    Printexc.print_backtrace stderr;
     Location.report_exception ppf exc;
-    (Unix.WEXITED(2), "", "Compiler error")
+    (Unix.WEXITED(2), "", Format.flush_str_formatter ())

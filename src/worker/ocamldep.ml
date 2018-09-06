@@ -18,8 +18,6 @@ open Parsetree
 
 module String = Misc.Stdlib.String
 
-let ppf = Format.err_formatter
-
 let tool_name = "ocamldep"
 
 (* Fix path to use '/' as directory separator instead of '\'. Under Windows. *)
@@ -107,12 +105,14 @@ let mli_file_dependencies source_file =
   in
   [(source_file, extracted_deps, !Depend.pp_deps)]
 
-let process_file_as process_fun source_file =
+let process_file_as ppf process_fun source_file =
   Compenv.readenv ppf (Before_compile source_file);
   Location.input_name := source_file;
   if Sys.file_exists source_file then process_fun source_file else []
 
 let run argv env cwd =
+  let ppf = Format.str_formatter in
+  Location.formatter_for_warnings := ppf;
   try
     Sys.chdir cwd;
 
@@ -130,9 +130,9 @@ let run argv env cwd =
 
     let files = match Array.to_list argv with
       | _ :: "-modules" :: "-impl" :: file :: [] ->
-        process_file_as ml_file_dependencies file
+        process_file_as ppf ml_file_dependencies file
       | _ :: "-modules" :: "-intf" :: file :: [] ->
-        process_file_as mli_file_dependencies file
+        process_file_as ppf mli_file_dependencies file
       | _ ->
         []
     in
@@ -144,10 +144,7 @@ let run argv env cwd =
       |> List.map file_deps_to_string
       |> String.concat "\n"
     in
-    (Unix.WEXITED(0), deps, "")
+    (Unix.WEXITED(0), deps, Format.flush_str_formatter ())
   with exc ->
-    (* TODO: print exceptions *)
-    Array.iter print_endline argv;
-    Printexc.print_backtrace stdout;
     Location.report_exception ppf exc;
-    (Unix.WEXITED(2), "", "ocamldep error")
+    (Unix.WEXITED(2), "", Format.flush_str_formatter ())

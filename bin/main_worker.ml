@@ -77,4 +77,7 @@ let () =
   (* Start listening for work requests. *)
   let chan_rd = Unix.in_channel_of_descr (Obj.magic 100) in
   let chan_wr = Unix.out_channel_of_descr (Obj.magic 101) in
+
+  (* Unix.close (Unix.descr_of_out_channel stderr); *)
+
   proc_main chan_rd chan_wr

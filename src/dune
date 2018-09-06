@@ -8,7 +8,8 @@
               opam_file_format
               usexp
               ocaml_config
-              which_program)
+              which_program
+              worker_cmd)
  (synopsis    "Internal Dune library, do not use!")
  (preprocess  (action (run src/let-syntax/pp.exe %{input-file}))))
 

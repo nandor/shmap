@@ -2,75 +2,53 @@
 open Compile_common
 
 
-(* Parse tree cache *)
-let impl_cache = Hashtbl.create 128
+let cache = Hashtbl.create 128
 
-let parse_impl ~tool_name ~preprocessor ~all_ppx sourcefile =
-  try Hashtbl.find impl_cache sourcefile
+let get bucket key default =
+  try
+    let value = Hashtbl.find cache (bucket, key) in
+    if key = "type-impl" then Hashtbl.remove cache (bucket, key);
+    Obj.obj value
   with Not_found ->
-    let ast =
-      Pparse.parse_implementation ~tool_name ~preprocessor ~all_ppx sourcefile
-    in
-    Hashtbl.add impl_cache sourcefile ast;
-    ast
+    let value = default () in
+    Hashtbl.add cache (bucket, key) (Obj.repr value);
+    value
 
-let intf_cache = Hashtbl.create 128
+let set bucket key value =
+  Hashtbl.replace cache (bucket, key) (Obj.repr value)
+
+(* Parse tree cache *)
+let parse_impl ~tool_name ~preprocessor ~all_ppx sourcefile =
+  get "ast-impl" sourcefile (fun () ->
+    Pparse.parse_implementation ~tool_name ~preprocessor ~all_ppx sourcefile)
 
 let parse_intf ~tool_name ~preprocessor ~all_ppx sourcefile =
-  try Hashtbl.find intf_cache sourcefile
-  with Not_found ->
-    let ast =
-      Pparse.parse_interface ~tool_name ~preprocessor ~all_ppx sourcefile
-    in
-    Hashtbl.add intf_cache sourcefile ast;
-    ast
+  get "ast-intf" sourcefile (fun () ->
+    Pparse.parse_interface ~tool_name ~preprocessor ~all_ppx sourcefile)
 
 (* Type information cache *)
-let impl_cache = Hashtbl.create 128
-
 let typecheck_impl info ast =
-  try
-    let typed = Hashtbl.find impl_cache info.sourcefile in
-    Hashtbl.remove impl_cache info.sourcefile;
-    typed
-  with Not_found ->
-    let ts, co, sg = Typemod.type_implementation
+  get "type-impl" info.sourcefile (fun () ->
+    let structure, coercion, signature = Typemod.type_implementation
         info.sourcefile
         info.modulename
         info.env ast
     in
-    let tst = (ts, co, sg, Env.imports ()) in
-    Hashtbl.add impl_cache info.sourcefile tst;
-    tst
-
+    { structure; coercion; signature; imports = Env.imports () })
 
 (* Cmi cache *)
-let cmi_cache = Hashtbl.create 128
-
 let read_signature ~filename =
-  try
-    Hashtbl.find cmi_cache filename
-  with Not_found ->
-    let cmi = Cmi_format.read_cmi filename in
-    Hashtbl.add cmi_cache filename cmi;
-    cmi
+  get "cmi" filename (fun () -> Cmi_format.read_cmi filename)
 
 let output_cmi_hook filename cmi =
-  Hashtbl.replace cmi_cache filename cmi
+  set "cmi" filename cmi
+
+(* Cmx cache *)
+let () =
+  let old_read_unit_info = !Compilenv.read_unit_info in
+  Compilenv.read_unit_info := (fun filename ->
+    get "cmx" filename (fun () -> old_read_unit_info filename))
 
 let () =
   Env.Persistent_signature.read := read_signature;
   Env.output_cmi_hook := output_cmi_hook
-
-
-(* Cmx cache *)
-let cmx_cache = Hashtbl.create 128
-
-let () =
-  let old_read_unit_info = !Compilenv.read_unit_info in
-  Compilenv.read_unit_info := (fun filename ->
-    try Hashtbl.find cmx_cache filename
-    with Not_found ->
-     let cmx = old_read_unit_info filename in
-     Hashtbl.add cmx_cache filename cmx;
-     cmx)

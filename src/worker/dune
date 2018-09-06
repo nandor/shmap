@@ -1,6 +1,15 @@
 (library
   (name worker)
-  (libraries unix
+  (modules (:standard \ commands))
+  (libraries
+    unix
     ocaml-compiler-libs.common
     ocaml-compiler-libs.bytecomp
-    ocaml-compiler-libs.optcomp))
+    ocaml-compiler-libs.optcomp
+    worker_cmd))
+
+(library
+  (name worker_cmd)
+  (modules commands)
+  (modules_without_implementation commands)
+  (libraries unix))

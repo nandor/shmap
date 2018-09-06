@@ -1,8 +1,4 @@
-
-type cmd
-  = Run of string * string array * string array * string
-  | Close
-
+open Worker_cmd.Commands
 
 let execute prog args env cwd =
   match Filename.basename prog with
@@ -60,13 +56,13 @@ let proc_main chan_rd chan_wr =
       ()
     | Run(cmd, args, env, cwd) ->
       (* Run the request to completion, capturing outputs. *)
-      let status =
+      let status, stdout, stderr =
         try execute cmd args env cwd
         with ex -> (Unix.WEXITED(255), "", Printexc.to_string ex)
       in
 
       (* Write the repsonse back to the parent. *)
-      Marshal.to_channel chan_wr status [];
+      Marshal.to_channel chan_wr (Done(status, stdout, stderr)) [];
       flush chan_wr;
 
       (* Keep on waiting for jobs. *)

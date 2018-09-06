@@ -24,5 +24,5 @@
  (name        main_worker)
  (public_name dune_worker)
  (modules     main_worker)
- (libraries   worker)
+ (libraries   worker worker_cmd)
  (preprocess  no_preprocessing))

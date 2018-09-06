@@ -1,4 +1,4 @@
-
+open Worker_cmd.Commands
 
 exception No_job_running
 exception Job_finished
@@ -41,18 +41,13 @@ type t =
   ; mutable next_id : int
   }
 
-type cmd
-  = Run of string * string array * string array * string
-  | Close
-
 
 let worker_name = "main_worker.exe"
 let worker_path = Filename.(concat (dirname Sys.executable_name) worker_name)
 
 let job_send { chan_wr } cmd =
-  let buffer = Bytes.unsafe_of_string (Marshal.to_string cmd []) in
-  let pipe_wr = Unix.descr_of_out_channel chan_wr in
-  ignore (Unix.write pipe_wr buffer 0 (Bytes.length buffer))
+  Marshal.to_channel chan_wr cmd [];
+  flush chan_wr
 
 let job_next t =
   match t with
@@ -64,7 +59,7 @@ let job_next t =
       t.pending <- ps;
       job_send w (Run(p.cmd, p.argv, p.env, p.cwd))
 
-let dequeue_jobs t =
+let rec dequeue_jobs t =
   let fds = List.map (fun ({ chan_rd }, _) ->
     Unix.descr_of_in_channel chan_rd) t.busy
   in
@@ -77,15 +72,17 @@ let dequeue_jobs t =
         List.mem (Unix.descr_of_in_channel chan_rd) fds)
       |> List.iter (fun (w, job) ->
         (* Read the response and finish the job. *)
-        let { chan_rd } = w in
-        let status, stdout, stderr = Marshal.from_channel chan_rd in
-        let finished_job = { job_id = job; status; stdout; stderr } in
+        let { chan_rd; chan_wr } = w in
+        match Marshal.from_channel chan_rd with
+        | Done(status, stdout, stderr) ->
+          let finished_job = { job_id = job; status; stdout; stderr } in
 
-        t.workers <- w :: t.workers;
-        t.busy <- List.filter (fun (w', _) -> w != w') t.busy;
-        t.finished <- finished_job :: t.finished;
-        (* After the worker is freed, start a job from the queue *)
-        job_next t)
+          t.workers <- w :: t.workers;
+          t.busy <- List.filter (fun (w', _) -> w != w') t.busy;
+          t.finished <- finished_job :: t.finished;
+          (* After the worker is freed, start a job from the queue *)
+          job_next t
+        )
 
 (* Creates a new process pool with a given number of threads. *)
 let spawn njobs =

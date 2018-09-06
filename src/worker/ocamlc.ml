@@ -122,7 +122,7 @@ let compile ppf =
           ~typing:(Some Cache.typecheck_impl)
       , Compile.interface
           ~frontend:(Some Cache.parse_intf)
-          ~typing:(Some Cache.typecheck_intf)
+          ~typing:None
       , ".cmo"
       , ".cma"
       );

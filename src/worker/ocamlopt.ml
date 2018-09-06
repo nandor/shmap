@@ -245,7 +245,7 @@ let compile ppf =
           ~backend
       , Optcompile.interface
           ~frontend:(Some Cache.parse_intf)
-          ~typing:(Some Cache.typecheck_intf)
+          ~typing:None
       , ".cmx"
       , ".cmxa"
       );
